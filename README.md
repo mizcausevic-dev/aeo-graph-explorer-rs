@@ -1,7 +1,7 @@
 # aeo-graph-explorer
 
 [![CI](https://github.com/mizcausevic-dev/aeo-graph-explorer-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/mizcausevic-dev/aeo-graph-explorer-rs/actions/workflows/ci.yml)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.86%2B-orange)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **HTTP graph-query service over AEO Protocol crawls.** Ingests `aeo-crawler` JSON-Lines, builds an in-memory typed graph, exposes neighbours / shortest-path / find-by-claim. **Layer 5 of the AEO Reference Stack** — the piece that turns a crawl into a queryable view.
@@ -119,7 +119,7 @@ cargo clippy --all-targets -- -Dwarnings
 cargo fmt --all -- --check
 ```
 
-CI matrix: `stable`, `beta`, `1.85.0` (MSRV). End-to-end HTTP tests run via `tower::ServiceExt` — no real network.
+CI matrix: `stable`, `beta`, `1.86.0` (MSRV). End-to-end HTTP tests run via `tower::ServiceExt` — no real network.
 
 ---
 

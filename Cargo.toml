@@ -2,7 +2,7 @@
 name        = "aeo-graph-explorer"
 version     = "0.1.0"
 edition     = "2021"
-rust-version = "1.85"
+rust-version = "1.86"
 description = "HTTP graph-query service over AEO Protocol crawls. Ingests aeo-crawler JSON Lines, builds an in-memory typed graph, exposes /nodes /neighbors /shortest-path /find-by-claim. Layer 5 of the AEO Reference Stack."
 license     = "MIT"
 repository  = "https://github.com/mizcausevic-dev/aeo-graph-explorer-rs"
