@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, beta, "1.86.0"]
+        toolchain: [stable, beta, "1.88.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -42,3 +42,9 @@ jobs:
 
       - name: Doc tests
         run: cargo test --doc
+
+      # Library consumers may strip out the audit-stream feature. Make
+      # sure that build path doesn't rot.
+      - name: Build (no-default-features, library-only)
+        if: matrix.toolchain == 'stable'
+        run: cargo build --no-default-features --lib

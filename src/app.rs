@@ -17,17 +17,40 @@ use crate::query::{find_by_claim, neighbors, shortest_path, ClaimMatch, Neighbor
 
 /// Shared app state — a single graph protected by a `RwLock` so `/ingest`
 /// can replace it atomically without blocking concurrent reads.
+///
+/// When built with the `audit-stream` feature (default), the state also
+/// holds a `reqwest::Client` reused for governance-event emission. The
+/// client itself is cheap; what matters is reusing connections so a
+/// burst of ingests doesn't open one TCP socket per emit.
 #[derive(Clone)]
 pub struct AppState {
     /// The graph itself.
     pub graph: Arc<RwLock<AeoGraph>>,
+    /// Shared HTTP client for `audit_stream::emit`. Always present when
+    /// the feature is on, even if `AUDIT_STREAM_URL` is unset (in which
+    /// case `emit` no-ops without using it).
+    #[cfg(feature = "audit-stream")]
+    pub audit_client: reqwest::Client,
 }
 
 impl AppState {
-    /// Construct fresh empty state.
+    /// Construct fresh empty state with a default audit-stream client.
     pub fn new() -> Self {
         Self {
             graph: Arc::new(RwLock::new(AeoGraph::default())),
+            #[cfg(feature = "audit-stream")]
+            audit_client: reqwest::Client::new(),
+        }
+    }
+
+    /// Build state with a caller-provided audit-stream client. Tests use
+    /// this to swap in a wiremock-backed client.
+    #[cfg(feature = "audit-stream")]
+    #[must_use]
+    pub fn with_audit_client(audit_client: reqwest::Client) -> Self {
+        Self {
+            graph: Arc::new(RwLock::new(AeoGraph::default())),
+            audit_client,
         }
     }
 }
@@ -140,10 +163,36 @@ async fn post_ingest(
     State(state): State<AppState>,
     body: String,
 ) -> Result<Json<serde_json::Value>, GraphError> {
-    let new_graph = AeoGraph::from_jsonl(&body)?;
+    let new_graph = match AeoGraph::from_jsonl(&body) {
+        Ok(g) => g,
+        Err(err) => {
+            #[cfg(feature = "audit-stream")]
+            crate::audit_stream::emit(
+                &state.audit_client,
+                "graph_ingest_failed",
+                serde_json::json!({
+                    "reason": err.to_string(),
+                    "input_bytes": body.len(),
+                }),
+            )
+            .await;
+            return Err(err);
+        }
+    };
     let nodes = new_graph.node_count();
     let edges = new_graph.edge_count();
     *state.graph.write().await = new_graph;
+    #[cfg(feature = "audit-stream")]
+    crate::audit_stream::emit(
+        &state.audit_client,
+        "graph_ingested",
+        serde_json::json!({
+            "nodes": nodes,
+            "edges": edges,
+            "input_bytes": body.len(),
+        }),
+    )
+    .await;
     Ok(Json(serde_json::json!({
         "status": "ok",
         "nodes": nodes,

@@ -1,9 +1,9 @@
 [package]
 name        = "aeo-graph-explorer"
-version     = "0.1.0"
+version     = "0.1.1"
 edition     = "2021"
-rust-version = "1.86"
-description = "HTTP graph-query service over AEO Protocol crawls. Ingests aeo-crawler JSON Lines, builds an in-memory typed graph, exposes /nodes /neighbors /shortest-path /find-by-claim. Layer 5 of the AEO Reference Stack."
+rust-version = "1.88"
+description = "HTTP graph-query service over AEO Protocol crawls. Ingests aeo-crawler JSON Lines, builds an in-memory typed graph, exposes /nodes /neighbors /shortest-path /find-by-claim. Layer 5 of the AEO Reference Stack. Optional audit-stream-py integration via the `audit-stream` feature."
 license     = "MIT"
 repository  = "https://github.com/mizcausevic-dev/aeo-graph-explorer-rs"
 homepage    = "https://kineticgain.com/"
@@ -13,6 +13,12 @@ keywords    = ["aeo", "graph", "axum", "petgraph", "well-known"]
 categories  = ["web-programming::http-server", "data-structures"]
 authors     = ["Miz Causevic <miz@kineticgain.com>"]
 
+[features]
+# On by default for the binary service. Library consumers who want a pure
+# graph crate can `default-features = false`.
+default      = ["audit-stream"]
+audit-stream = ["dep:reqwest"]
+
 [dependencies]
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -21,11 +27,19 @@ petgraph   = "0.6"
 axum       = "0.7"
 tokio      = { version = "1.38", features = ["full"] }
 tower      = "0.5"
+# Optional, only pulled in when the `audit-stream` feature is enabled
+# (which is the default).
+reqwest    = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 [dev-dependencies]
 tokio      = { version = "1.38", features = ["full", "test-util"] }
 reqwest    = { version = "0.12", default-features = false, features = ["json"] }
 criterion  = "0.5"
+wiremock   = "0.6"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[bench]]
 name    = "graph_build"

@@ -66,6 +66,11 @@ pub mod graph;
 pub mod model;
 pub mod query;
 
+/// Optional audit-stream-py producer. Gated behind the `audit-stream`
+/// Cargo feature (on by default for the binary service).
+#[cfg(feature = "audit-stream")]
+pub mod audit_stream;
+
 pub use app::{build_router, AppState};
 pub use error::GraphError;
 pub use graph::{AeoGraph, EdgeKind};
