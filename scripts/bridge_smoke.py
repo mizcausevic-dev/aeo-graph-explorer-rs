@@ -113,7 +113,7 @@ def main() -> int:
         )
         assert all("body" in line and "provenance" in line for line in lines)
 
-        subprocess.run(["cargo", "build", "--locked"], cwd=graph_dir, check=True, timeout=120)
+        subprocess.run(["cargo", "build", "--locked"], cwd=graph_dir, check=True, timeout=600)
         binary = graph_dir / "target" / "debug" / (
             "aeo-graph-explorer.exe" if os.name == "nt" else "aeo-graph-explorer"
         )
