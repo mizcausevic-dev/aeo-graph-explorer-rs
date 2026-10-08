@@ -34,6 +34,48 @@ fn malformed_line_returns_jsonline_error() {
 }
 
 #[test]
+fn duplicate_ids_are_rejected_instead_of_silently_replaced() {
+    let line = r#"{"id":"a","entity":{"id":"a"},"body":{}}"#;
+    let err = AeoGraph::from_jsonl(&format!("{line}\n{line}\n")).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::DuplicateNode(2)
+    ));
+}
+
+#[test]
+fn node_and_summary_ids_must_match() {
+    let err = AeoGraph::from_jsonl(r#"{"id":"a","entity":{"id":"b"}}"#).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::InvalidNode(1)
+    ));
+}
+
+#[test]
+fn enriched_rows_require_a_body_object() {
+    let err = AeoGraph::from_jsonl(r#"{"id":"a","entity":{"id":"a"}}"#).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::InvalidBody(1)
+    ));
+}
+
+#[test]
+fn wiring_edges_twice_is_idempotent() {
+    let mut graph = AeoGraph::from_jsonl(JSONL).unwrap();
+    let edges = graph.edge_count();
+    graph.wire_edges();
+    assert_eq!(graph.edge_count(), edges);
+}
+
+#[test]
+fn empty_upload_cannot_replace_the_graph() {
+    let err = AeoGraph::from_jsonl("\n \n").unwrap_err();
+    assert!(matches!(err, aeo_graph_explorer::GraphError::EmptyGraph));
+}
+
+#[test]
 fn neighbors_split_inbound_and_outbound() {
     let g = AeoGraph::from_jsonl(JSONL).unwrap();
     let view = neighbors(&g, "https://other.example/#org").unwrap();

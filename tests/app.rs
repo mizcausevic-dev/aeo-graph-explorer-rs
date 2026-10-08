@@ -19,6 +19,7 @@ async fn ingest(app: &axum::Router) {
                 .method("POST")
                 .uri("/ingest")
                 .header("content-type", "application/json")
+                .header("authorization", "Bearer test-token")
                 .body(Body::from(JSONL))
                 .unwrap(),
         )
@@ -33,7 +34,7 @@ async fn body_json(resp: axum::response::Response) -> Value {
 }
 
 fn router() -> axum::Router {
-    build_router(AppState::new())
+    build_router(AppState::new().with_ingest_token("test-token"))
 }
 
 #[tokio::test]
@@ -220,10 +221,117 @@ async fn ingest_malformed_jsonl_is_400() {
             Request::builder()
                 .method("POST")
                 .uri("/ingest")
+                .header("authorization", "Bearer test-token")
                 .body(Body::from("not valid json"))
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn ingest_is_disabled_by_default() {
+    let app = build_router(AppState::new());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .body(Body::from(JSONL))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn ingest_requires_the_correct_token_and_preserves_the_graph() {
+    let app = router();
+    for authorization in [None, Some("Bearer wrong-token")] {
+        let mut request = Request::builder().method("POST").uri("/ingest");
+        if let Some(value) = authorization {
+            request = request.header("authorization", value);
+        }
+        let resp = app
+            .clone()
+            .oneshot(request.body(Body::from(JSONL)).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+    let stats = app
+        .oneshot(
+            Request::builder()
+                .uri("/stats")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(body_json(stats).await["nodes"], 0);
+}
+
+#[tokio::test]
+async fn oversized_ingest_is_rejected_before_replacement() {
+    let app = router();
+    let oversized = "x".repeat(2 * 1024 * 1024 + 1);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .header("authorization", "Bearer test-token")
+                .body(Body::from(oversized))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let stats = app
+        .oneshot(
+            Request::builder()
+                .uri("/stats")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(body_json(stats).await["nodes"], 0);
+}
+
+#[tokio::test]
+async fn current_aeo_crawler_summary_is_rejected_with_contract_guidance() {
+    // Source: aeo-crawler README at f577f020, its CLI emits Result rows.
+    const CRAWLER_ROW: &str = r#"{"origin":"https://mizcausevic-dev.github.io","depth":0,"success":true,"entity_name":"Miz Causevic","entity_type":"Person","claims_count":6,"audit_mode":"none","fetched_at":"2026-05-12T04:00:00Z"}"#;
+    let app = router();
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .header("authorization", "Bearer test-token")
+                .body(Body::from(CRAWLER_ROW))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert!(body_json(resp).await["error"]
+        .as_str()
+        .unwrap()
+        .contains("aeo-crawler summary row"));
+    let stats = app
+        .oneshot(
+            Request::builder()
+                .uri("/stats")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(body_json(stats).await["nodes"], 0);
 }
