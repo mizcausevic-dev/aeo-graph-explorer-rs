@@ -27,6 +27,10 @@ pub enum GraphError {
     #[error("line {0} is an aeo-crawler summary row; /ingest requires enriched JSONL with id, entity, and body")]
     CrawlerSummary(usize),
 
+    /// The declared crawl origin was malformed or duplicated.
+    #[error("line {0} has invalid crawler provenance; origin must be a unique HTTP(S) origin")]
+    InvalidProvenance(usize),
+
     /// The upload cannot replace the graph with an empty one accidentally.
     #[error("JSONL must contain at least one enriched node")]
     EmptyGraph,

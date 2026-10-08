@@ -14,6 +14,46 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
+  bridge-smoke:
+    name: crawler to explorer (synthetic)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out explorer
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: explorer
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      # Pin the producer to the exact reviewed PR commit. Update deliberately
+      # when the crawler contract changes; do not silently follow a branch.
+      - name: Check out crawler contract
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: mizcausevic-dev/aeo-crawler
+          ref: f197e83827060e7423a378d968d75b2980f50177
+          path: aeo-crawler
+          persist-credentials: false
+      - name: Verify crawler revision
+        working-directory: aeo-crawler
+        run: test "$(git rev-parse HEAD)" = "f197e83827060e7423a378d968d75b2980f50177"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: aeo-crawler/go.mod
+          cache-dependency-path: aeo-crawler/go.sum
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: explorer
+      - name: Run local fixture bridge
+        working-directory: explorer
+        run: python scripts/bridge_smoke.py ../aeo-crawler
+
   test:
     name: test (${{ matrix.toolchain }})
     runs-on: ubuntu-latest

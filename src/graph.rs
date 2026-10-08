@@ -1,10 +1,11 @@
 //! The in-memory typed graph.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use url::Url;
 
 use crate::error::GraphError;
 use crate::model::AeoNode;
@@ -27,12 +28,12 @@ pub struct AeoGraph {
 }
 
 impl AeoGraph {
-    /// Build a graph from enriched JSONL — one AEO node per line. The current
-    /// `aeo-crawler` CLI emits summary rows without bodies, which are rejected.
-    /// Edges are inferred from `peers` and
-    /// `authority.primary_sources` arrays.
+    /// Build a graph from enriched JSONL — one AEO node per line. The crawler's
+    /// default summary rows remain invalid; use its opt-in graph export.
+    /// Edges are inferred from `peers` and `authority.primary_sources` arrays.
     pub fn from_jsonl(raw: &str) -> Result<Self, GraphError> {
         let mut graph = Self::default();
+        let mut origins = HashSet::new();
         for (line_idx, line) in raw.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() {
@@ -62,6 +63,20 @@ impl AeoGraph {
             }
             if graph.index.contains_key(&node.id) {
                 return Err(GraphError::DuplicateNode(line_idx + 1));
+            }
+            if let Some(provenance) = &node.provenance {
+                let Some(origin) = http_origin(&provenance.origin) else {
+                    return Err(GraphError::InvalidProvenance(line_idx + 1));
+                };
+                let url = Url::parse(&provenance.origin)
+                    .map_err(|_| GraphError::InvalidProvenance(line_idx + 1))?;
+                if url.path() != "/"
+                    || url.query().is_some()
+                    || url.fragment().is_some()
+                    || !origins.insert(origin)
+                {
+                    return Err(GraphError::InvalidProvenance(line_idx + 1));
+                }
             }
             graph.upsert(node);
         }
@@ -95,6 +110,23 @@ impl AeoGraph {
             .map(|i| (i, self.graph[i].clone()))
             .collect();
 
+        // AEO primary sources are URLs, while crawler graph nodes are keyed by
+        // entity IDs. Match the same normalized origin rule the crawler uses.
+        // If callers upsert conflicting origins directly, do not guess a target.
+        let mut by_origin: HashMap<String, Option<NodeIndex>> = HashMap::new();
+        for (idx, node) in &snapshot {
+            if let Some(origin) = node
+                .provenance
+                .as_ref()
+                .and_then(|p| http_origin(&p.origin))
+            {
+                by_origin
+                    .entry(origin)
+                    .and_modify(|target| *target = None)
+                    .or_insert(Some(*idx));
+            }
+        }
+
         for (from_idx, node) in &snapshot {
             // Peers: `body.peers: [{ "id": "...", ... }, ...]`
             if let Some(peers) = node.body.get("peers").and_then(|v| v.as_array()) {
@@ -108,19 +140,23 @@ impl AeoGraph {
                 }
             }
             // Authority: `body.authority.primary_sources: [url, ...]`
-            // Crawler-side convention is that primary_sources can be
-            // arbitrary URLs; we wire an edge only if a node with that id
-            // exists in the loaded graph.
+            // Prefer an exact entity ID when present. Crawler graph exports
+            // also resolve arbitrary source URLs to fetched origins.
             if let Some(sources) = node
                 .body
                 .get("authority")
                 .and_then(|v| v.get("primary_sources"))
                 .and_then(|v| v.as_array())
             {
+                let mut seen_targets = HashSet::new();
                 for src in sources {
                     if let Some(url) = src.as_str() {
-                        if let Some(&src_idx) = self.index.get(url) {
-                            if src_idx != *from_idx {
+                        let target = self.index.get(url).copied().or_else(|| {
+                            http_origin(url)
+                                .and_then(|origin| by_origin.get(&origin).copied().flatten())
+                        });
+                        if let Some(src_idx) = target {
+                            if src_idx != *from_idx && seen_targets.insert(src_idx) {
                                 self.graph
                                     .add_edge(*from_idx, src_idx, EdgeKind::CitesAuthority);
                             }
@@ -158,4 +194,16 @@ impl AeoGraph {
     pub(crate) fn raw(&self) -> &DiGraph<AeoNode, EdgeKind> {
         &self.graph
     }
+}
+
+fn http_origin(raw: &str) -> Option<String> {
+    let url = Url::parse(raw).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    Some(url.origin().ascii_serialization())
 }

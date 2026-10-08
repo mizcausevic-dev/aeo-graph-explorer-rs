@@ -3,7 +3,7 @@
 //! We don't pull in `aeo-sdk-rust` because that would force callers into a
 //! specific spec version. Ingestion requires matching `id` and `entity.id`
 //! plus a `body` object, but does not validate the full AEO document schema.
-//! The current upstream crawler's summary JSONL is not this input shape.
+//! The upstream crawler's opt-in `--format graph` uses this input shape.
 
 use std::collections::HashMap;
 
@@ -23,6 +23,21 @@ pub struct AeoNode {
     /// `/nodes/{id}`; completeness is not independently verified.
     #[serde(default)]
     pub body: HashMap<String, Value>,
+    /// Optional source metadata from the crawler's opt-in graph export.
+    /// This is caller supplied, not an independent provenance check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<CrawlProvenance>,
+}
+
+/// Source metadata emitted by `aeo-crawler --format graph`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct CrawlProvenance {
+    /// Normalized origin whose well-known declaration was fetched.
+    pub origin: String,
+    /// Breadth-first depth from the seed.
+    pub depth: usize,
+    /// UTC fetch time, formatted as RFC 3339 by the crawler.
+    pub fetched_at: String,
 }
 
 /// Denormalised view of the most-asked-about fields.
