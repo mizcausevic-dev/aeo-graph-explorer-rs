@@ -2,7 +2,7 @@
 //!
 //! When the `audit-stream` Cargo feature is enabled (the default for the
 //! binary service) **and** the `AUDIT_STREAM_URL` env var is set, the
-//! service fires one governance event per atomic state change:
+//! service attempts one governance event per atomic state change:
 //!
 //! - `graph_ingested`       on a successful `POST /ingest`
 //! - `graph_ingest_failed`  on a malformed `POST /ingest` (4xx response)
@@ -13,8 +13,9 @@
 //! - `AUDIT_STREAM_URL`        — base URL, e.g. `http://audit.local:8093`
 //! - `AUDIT_STREAM_TIMEOUT_S`  — per-call timeout, default 2.5s
 //!
-//! Best-effort. Failures are logged to stderr and swallowed — an
-//! audit-stream outage must never block graph ingestion.
+//! Best-effort. Failures are logged to stderr and swallowed. An
+//! audit-stream outage cannot roll back graph ingestion, but the response
+//! can wait up to the configured timeout.
 
 use std::env;
 use std::time::Duration;
@@ -38,7 +39,17 @@ pub fn base_url() -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    Some(trimmed.trim_end_matches('/').to_string())
+    let parsed = reqwest::Url::parse(trimmed).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    Some(parsed.as_str().trim_end_matches('/').to_string())
 }
 
 /// Configured per-call timeout. Defaults to 2.5 seconds.
@@ -47,7 +58,8 @@ pub fn timeout() -> Duration {
     let secs = env::var("AUDIT_STREAM_TIMEOUT_S")
         .ok()
         .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map_or(DEFAULT_TIMEOUT_S, |v| v.max(0.1));
+        .filter(|v| v.is_finite())
+        .map_or(DEFAULT_TIMEOUT_S, |v| v.clamp(0.1, 30.0));
     Duration::from_secs_f64(secs)
 }
 
@@ -79,8 +91,8 @@ pub async fn emit(client: &reqwest::Client, kind: &str, payload: serde_json::Val
                 resp.status()
             );
         }
-        Err(err) => {
-            eprintln!("audit-stream emit failed (kind={kind}): {err}");
+        Err(_) => {
+            eprintln!("audit-stream emit failed (kind={kind}): network or timeout error");
         }
     }
 }
@@ -144,6 +156,22 @@ mod tests {
     }
 
     #[test]
+    fn rejects_audit_url_with_credentials_or_query() {
+        let _l = ENV_GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        reset_env();
+        for raw in [
+            "http://user:pass@audit.local:8093",
+            "http://audit.local:8093/?token=x",
+        ] {
+            env::set_var("AUDIT_STREAM_URL", raw);
+            assert!(!is_enabled());
+        }
+        env::remove_var("AUDIT_STREAM_URL");
+    }
+
+    #[test]
     fn timeout_default() {
         let _l = ENV_GUARD
             .lock()
@@ -170,6 +198,17 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_env();
         env::set_var("AUDIT_STREAM_TIMEOUT_S", "not-a-number");
+        assert_eq!(timeout(), Duration::from_secs_f64(DEFAULT_TIMEOUT_S));
+        env::remove_var("AUDIT_STREAM_TIMEOUT_S");
+    }
+
+    #[test]
+    fn timeout_infinite_value_falls_back_without_panicking() {
+        let _l = ENV_GUARD
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        reset_env();
+        env::set_var("AUDIT_STREAM_TIMEOUT_S", "inf");
         assert_eq!(timeout(), Duration::from_secs_f64(DEFAULT_TIMEOUT_S));
         env::remove_var("AUDIT_STREAM_TIMEOUT_S");
     }

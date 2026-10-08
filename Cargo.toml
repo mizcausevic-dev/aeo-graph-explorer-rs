@@ -1,9 +1,9 @@
 [package]
 name        = "aeo-graph-explorer"
-version     = "0.1.1"
+version     = "0.2.0"
 edition     = "2021"
 rust-version = "1.88"
-description = "HTTP graph-query service over AEO Protocol crawls. Ingests aeo-crawler JSON Lines, builds an in-memory typed graph, exposes /nodes /neighbors /shortest-path /find-by-claim. Layer 5 of the AEO Reference Stack. Optional audit-stream-py integration via the `audit-stream` feature."
+description = "HTTP graph-query service for enriched AEO JSONL with nodes, neighbors, shortest paths, and claim search. Current aeo-crawler summary output needs an adapter."
 license     = "MIT"
 repository  = "https://github.com/mizcausevic-dev/aeo-graph-explorer-rs"
 homepage    = "https://kineticgain.com/"
@@ -12,6 +12,7 @@ readme      = "README.md"
 keywords    = ["aeo", "graph", "axum", "petgraph", "well-known"]
 categories  = ["web-programming::http-server", "data-structures"]
 authors     = ["Miz Causevic <miz@kineticgain.com>"]
+include     = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "src/**", "examples/**", "tests/**", "benches/**"]
 
 [features]
 # On by default for the binary service. Library consumers who want a pure
@@ -23,6 +24,7 @@ audit-stream = ["dep:reqwest"]
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror  = "1.0"
+subtle     = "2.6"
 petgraph   = "0.6"
 axum       = "0.7"
 tokio      = { version = "1.38", features = ["full"] }

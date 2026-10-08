@@ -7,16 +7,14 @@
 //! ```text
 //! 1. SDKs       aeo-sdk-python / -typescript / -rust / -go / -swift
 //! 2. CLI        aeo-cli
-//! 3. Crawler    aeo-crawler                 produces JSONL
-//! 4. Validator  aeo-validator-service       always-on validation + drift
+//! 3. Crawler    aeo-crawler                 produces summary JSONL
+//! 4. Validator  aeo-validator-service       HTTP validation + caller-triggered drift rechecks
 //! 5. Explorer   aeo-graph-explorer-rs       <- this repo
 //! ```
 //!
 //! ## What it does
 //!
-//! `aeo-crawler` BFS-walks an AEO graph from a seed URL and dumps one node
-//! per JSON line. That's a great pipeline output and a terrible query
-//! interface. This crate ingests the JSONL into a typed petgraph + an
+//! This crate ingests enriched AEO JSONL into a typed petgraph + an
 //! `axum` HTTP layer, so callers can ask:
 //!
 //! - `GET /nodes` — list every entity in the graph.
@@ -34,22 +32,20 @@
 //!   future endpoints can answer "what authorities does X chain through?"
 //!   without re-walking.
 //! - The whole graph lives behind a `tokio::sync::RwLock` so an `/ingest`
-//!   atomically replaces it. Read paths take a snapshot and never block
-//!   each other.
+//!   atomically replaces it. Read paths can pause briefly during replacement.
 //! - No database. Crawls are small (thousands of nodes, not millions) and
 //!   the right tool for "give me a queryable view of a recent crawl" is an
 //!   in-memory graph.
 //!
-//! ## Composes with
+//! ## Potential integrations
 //!
 //! - **[aeo-crawler](https://github.com/mizcausevic-dev/aeo-crawler)** —
-//!   produces the JSONL this service ingests.
+//!   its current summary JSONL needs an enriched export or adapter before
+//!   the graph endpoints can use it.
 //! - **[aeo-validator-service](https://github.com/mizcausevic-dev/aeo-validator-service)**
-//!   — call `POST /watches` for every node returned by `/nodes` to set up
-//!   drift tracking across the whole graph.
+//!   — a separate adapter could select watch URLs from `/nodes`.
 //! - **[incident-correlation-rs](https://github.com/mizcausevic-dev/incident-correlation-rs)**
-//!   — when an incident lands, ask `/find-by-claim` for everyone declaring
-//!   the affected entity, then seed the correlator with the result.
+//!   — a separate adapter could find candidate affected entities via `/find-by-claim`.
 
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]

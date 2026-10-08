@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
 use crate::error::GraphError;
@@ -15,8 +16,11 @@ use crate::graph::AeoGraph;
 use crate::model::{AeoEntity, AeoNode};
 use crate::query::{find_by_claim, neighbors, shortest_path, ClaimMatch, NeighborView, PathResult};
 
+/// Cap JSONL uploads before they are buffered or parsed.
+pub const MAX_INGEST_BYTES: usize = 2 * 1024 * 1024;
+
 /// Shared app state — a single graph protected by a `RwLock` so `/ingest`
-/// can replace it atomically without blocking concurrent reads.
+/// can replace it atomically. Reads can pause briefly during replacement.
 ///
 /// When built with the `audit-stream` feature (default), the state also
 /// holds a `reqwest::Client` reused for governance-event emission. The
@@ -26,6 +30,8 @@ use crate::query::{find_by_claim, neighbors, shortest_path, ClaimMatch, Neighbor
 pub struct AppState {
     /// The graph itself.
     pub graph: Arc<RwLock<AeoGraph>>,
+    /// An unset token disables graph replacement, including in library routers.
+    ingest_token: Option<String>,
     /// Shared HTTP client for `audit_stream::emit`. Always present when
     /// the feature is on, even if `AUDIT_STREAM_URL` is unset (in which
     /// case `emit` no-ops without using it).
@@ -38,8 +44,12 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             graph: Arc::new(RwLock::new(AeoGraph::default())),
+            ingest_token: None,
             #[cfg(feature = "audit-stream")]
-            audit_client: reqwest::Client::new(),
+            audit_client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("default audit client configuration must be valid"),
         }
     }
 
@@ -50,8 +60,17 @@ impl AppState {
     pub fn with_audit_client(audit_client: reqwest::Client) -> Self {
         Self {
             graph: Arc::new(RwLock::new(AeoGraph::default())),
+            ingest_token: None,
             audit_client,
         }
+    }
+
+    /// Enable ingestion with a non-empty bearer token supplied by the operator.
+    #[must_use]
+    pub fn with_ingest_token(mut self, token: impl Into<String>) -> Self {
+        let token = token.into();
+        self.ingest_token = (!token.is_empty()).then_some(token);
+        self
     }
 }
 
@@ -71,7 +90,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/nodes/:id/neighbors", get(get_neighbors))
         .route("/shortest-path", get(get_shortest_path))
         .route("/find-by-claim", get(get_find_by_claim))
-        .route("/ingest", post(post_ingest))
+        .route(
+            "/ingest",
+            post(post_ingest).layer(DefaultBodyLimit::max(MAX_INGEST_BYTES)),
+        )
         .route("/stats", get(get_stats))
         .with_state(state)
 }
@@ -84,7 +106,7 @@ async fn root() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "name": "aeo-graph-explorer",
         "version": env!("CARGO_PKG_VERSION"),
-        "description": "HTTP graph-query service over AEO Protocol crawls. Layer 5 of the AEO Reference Stack.",
+        "description": "HTTP graph-query service for enriched AEO JSONL. Designed as Layer 5 of the AEO Reference Stack.",
         "endpoints": {
             "GET  /healthz": "liveness probe",
             "GET  /nodes": "list every entity in the graph (summary)",
@@ -92,7 +114,7 @@ async fn root() -> Json<serde_json::Value> {
             "GET  /nodes/{id}/neighbors": "outbound + inbound neighbours",
             "GET  /shortest-path?from=&to=": "A* over the graph",
             "GET  /find-by-claim?predicate=&value=": "linear claim search",
-            "POST /ingest": "load JSONL (one AEO doc per line) and rebuild",
+            "POST /ingest": "load enriched JSONL (one node per line) and rebuild; bearer token required",
             "GET  /stats": "node_count + edge_count"
         }
     }))
@@ -161,8 +183,20 @@ async fn get_find_by_claim(
 
 async fn post_ingest(
     State(state): State<AppState>,
+    headers: HeaderMap,
     body: String,
 ) -> Result<Json<serde_json::Value>, GraphError> {
+    let Some(expected) = state.ingest_token.as_deref() else {
+        return Err(GraphError::IngestDisabled);
+    };
+    let supplied = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if !token_matches(expected, supplied) {
+        return Err(GraphError::Unauthorized);
+    }
     let new_graph = match AeoGraph::from_jsonl(&body) {
         Ok(g) => g,
         Err(err) => {
@@ -171,7 +205,7 @@ async fn post_ingest(
                 &state.audit_client,
                 "graph_ingest_failed",
                 serde_json::json!({
-                    "reason": err.to_string(),
+                    "reason": "invalid_jsonl",
                     "input_bytes": body.len(),
                 }),
             )
@@ -200,6 +234,15 @@ async fn post_ingest(
     })))
 }
 
+// The token length is configuration, not a secret; compare equal-length
+// contents without exiting early on a matching prefix.
+fn token_matches(expected: &str, supplied: &str) -> bool {
+    if expected.len() != supplied.len() {
+        return false;
+    }
+    bool::from(expected.as_bytes().ct_eq(supplied.as_bytes()))
+}
+
 async fn get_stats(State(state): State<AppState>) -> Json<serde_json::Value> {
     let graph = state.graph.read().await;
     Json(serde_json::json!({
@@ -215,10 +258,17 @@ async fn get_stats(State(state): State<AppState>) -> Json<serde_json::Value> {
 impl IntoResponse for GraphError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
+            GraphError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
+            GraphError::IngestDisabled => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
             GraphError::NotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
-            GraphError::JsonLine { .. } | GraphError::UnknownNode(_) | GraphError::EmptyQuery => {
-                (StatusCode::BAD_REQUEST, self.to_string())
-            }
+            GraphError::JsonLine { .. }
+            | GraphError::CrawlerSummary(_)
+            | GraphError::EmptyGraph
+            | GraphError::InvalidBody(_)
+            | GraphError::DuplicateNode(_)
+            | GraphError::InvalidNode(_)
+            | GraphError::UnknownNode(_)
+            | GraphError::EmptyQuery => (StatusCode::BAD_REQUEST, self.to_string()),
         };
         (status, Json(serde_json::json!({"error": message}))).into_response()
     }

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// One ingested AEO node — the JSONL line stored verbatim, plus a denormalised
+/// One ingested AEO node — the parsed JSONL body plus a denormalised
 /// `entity` so the query API doesn't have to peek inside `body` every time.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AeoNode {

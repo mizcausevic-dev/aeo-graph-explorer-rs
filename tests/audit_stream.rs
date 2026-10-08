@@ -50,6 +50,7 @@ async fn ingest(app: &axum::Router, body: &'static str) -> StatusCode {
             Request::builder()
                 .method("POST")
                 .uri("/ingest")
+                .header("authorization", "Bearer test-token")
                 .body(Body::from(body))
                 .unwrap(),
         )
@@ -71,7 +72,7 @@ async fn ingest_emits_graph_ingested_when_enabled() {
         .mount(&server)
         .await;
 
-    let state = AppState::with_audit_client(reqwest::Client::new());
+    let state = AppState::with_audit_client(reqwest::Client::new()).with_ingest_token("test-token");
     let app = build_router(state);
     assert_eq!(ingest(&app, JSONL).await, StatusCode::OK);
 
@@ -97,7 +98,7 @@ async fn malformed_ingest_emits_graph_ingest_failed() {
         .mount(&server)
         .await;
 
-    let state = AppState::with_audit_client(reqwest::Client::new());
+    let state = AppState::with_audit_client(reqwest::Client::new()).with_ingest_token("test-token");
     let app = build_router(state);
     assert_eq!(
         ingest(&app, "not valid json").await,
@@ -118,7 +119,7 @@ async fn ingest_is_silent_when_env_var_unset() {
     // No AUDIT_STREAM_URL set. emit() must short-circuit before hitting the
     // mock — we configure no expectations and assert nothing was received.
     let server = MockServer::start().await;
-    let state = AppState::with_audit_client(reqwest::Client::new());
+    let state = AppState::with_audit_client(reqwest::Client::new()).with_ingest_token("test-token");
     let app = build_router(state);
     assert_eq!(ingest(&app, JSONL).await, StatusCode::OK);
 
@@ -137,7 +138,29 @@ async fn audit_stream_outage_does_not_break_ingest() {
             .timeout(std::time::Duration::from_millis(500))
             .build()
             .unwrap(),
-    );
+    )
+    .with_ingest_token("test-token");
     let app = build_router(state);
     assert_eq!(ingest(&app, JSONL).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn default_audit_client_does_not_follow_redirects() {
+    let _guard = EnvGuard::lock();
+    let server = MockServer::start().await;
+    std::env::set_var("AUDIT_STREAM_URL", server.uri());
+    Mock::given(method("POST"))
+        .and(path("/events"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("location", format!("{}/redirect-target", server.uri())),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let app = build_router(AppState::new().with_ingest_token("test-token"));
+    assert_eq!(ingest(&app, JSONL).await, StatusCode::OK);
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url.path(), "/events");
 }

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::GraphError;
 use crate::model::AeoNode;
@@ -26,8 +27,9 @@ pub struct AeoGraph {
 }
 
 impl AeoGraph {
-    /// Build a graph from JSONL — one AEO document per line, in the same shape
-    /// `aeo-crawler` emits. Edges are inferred from `peers` and
+    /// Build a graph from enriched JSONL — one AEO node per line. The current
+    /// `aeo-crawler` CLI emits summary rows without bodies, which are rejected.
+    /// Edges are inferred from `peers` and
     /// `authority.primary_sources` arrays.
     pub fn from_jsonl(raw: &str) -> Result<Self, GraphError> {
         let mut graph = Self::default();
@@ -36,11 +38,35 @@ impl AeoGraph {
             if line.is_empty() {
                 continue;
             }
-            let node: AeoNode = serde_json::from_str(line).map_err(|err| GraphError::JsonLine {
+            let value: Value = serde_json::from_str(line).map_err(|err| GraphError::JsonLine {
                 line: line_idx + 1,
                 source: err,
             })?;
+            if value.get("origin").is_some()
+                && value.get("success").is_some()
+                && value.get("id").is_none()
+            {
+                return Err(GraphError::CrawlerSummary(line_idx + 1));
+            }
+            let has_body = value.get("body").is_some_and(Value::is_object);
+            let node: AeoNode =
+                serde_json::from_value(value).map_err(|err| GraphError::JsonLine {
+                    line: line_idx + 1,
+                    source: err,
+                })?;
+            if node.id.is_empty() || node.id != node.entity.id {
+                return Err(GraphError::InvalidNode(line_idx + 1));
+            }
+            if !has_body {
+                return Err(GraphError::InvalidBody(line_idx + 1));
+            }
+            if graph.index.contains_key(&node.id) {
+                return Err(GraphError::DuplicateNode(line_idx + 1));
+            }
             graph.upsert(node);
+        }
+        if graph.node_count() == 0 {
+            return Err(GraphError::EmptyGraph);
         }
         graph.wire_edges();
         Ok(graph)
@@ -61,6 +87,7 @@ impl AeoGraph {
 
     /// After all nodes are loaded, walk the bodies and wire up edges.
     pub fn wire_edges(&mut self) {
+        self.graph.clear_edges();
         // Snapshot ids -> indices so the mutable borrow doesn't fight us.
         let snapshot: Vec<(NodeIndex, AeoNode)> = self
             .graph
