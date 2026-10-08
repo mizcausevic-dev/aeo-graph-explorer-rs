@@ -110,7 +110,7 @@ async fn root() -> Json<serde_json::Value> {
         "endpoints": {
             "GET  /healthz": "liveness probe",
             "GET  /nodes": "list every entity in the graph (summary)",
-            "GET  /nodes/{id}": "fetch one entity's full AEO body",
+            "GET  /nodes/{id}": "fetch one stored node and its supplied body",
             "GET  /nodes/{id}/neighbors": "outbound + inbound neighbours",
             "GET  /shortest-path?from=&to=": "A* over the graph",
             "GET  /find-by-claim?predicate=&value=": "linear claim search",

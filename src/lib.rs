@@ -18,9 +18,9 @@
 //! `axum` HTTP layer, so callers can ask:
 //!
 //! - `GET /nodes` — list every entity in the graph.
-//! - `GET /nodes/{id}` — fetch one entity's full AEO doc.
+//! - `GET /nodes/{id}` — fetch one stored node and its supplied body.
 //! - `GET /nodes/{id}/neighbors` — declared peers + reverse references.
-//! - `GET /shortest-path?from=X&to=Y` — does a citation chain connect them?
+//! - `GET /shortest-path?from=X&to=Y` — is there a directed path through declared edges?
 //! - `GET /find-by-claim?predicate=...&value=...` — pull entities whose
 //!   claims match a predicate/value pair.
 //! - `POST /ingest` — load a JSONL document and rebuild the graph atomically.

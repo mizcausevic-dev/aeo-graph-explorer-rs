@@ -1,9 +1,9 @@
-//! Serde-friendly view of an AEO doc.
+//! Serde-friendly view of an enriched AEO graph node.
 //!
 //! We don't pull in `aeo-sdk-rust` because that would force callers into a
-//! specific spec version. Instead we accept "anything that has `entity.id`
-//! and `claims`" and treat unknown fields as opaque — the JSONL is whatever
-//! the upstream crawler emitted.
+//! specific spec version. Ingestion requires matching `id` and `entity.id`
+//! plus a `body` object, but does not validate the full AEO document schema.
+//! The current upstream crawler's summary JSONL is not this input shape.
 
 use std::collections::HashMap;
 
@@ -19,8 +19,8 @@ pub struct AeoNode {
     /// Lightweight summary used by `/nodes` so list responses don't carry the
     /// whole body.
     pub entity: AeoEntity,
-    /// Full AEO doc (whatever the crawler captured). Returned by
-    /// `/nodes/{id}`.
+    /// Parsed body supplied in the enriched input row. Returned by
+    /// `/nodes/{id}`; completeness is not independently verified.
     #[serde(default)]
     pub body: HashMap<String, Value>,
 }

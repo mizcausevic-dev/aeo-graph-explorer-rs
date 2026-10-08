@@ -21,7 +21,7 @@
 The graph endpoints need each entity's identifier, body, claims, and relationship fields. This service:
 
 1. Ingests enriched JSONL and indexes it.
-2. Exposes the things crawl consumers actually want — list every entity, fetch one entity's full doc, expand a node's neighbourhood, find the shortest citation chain between two entities, scan claims by predicate / value.
+2. Exposes graph queries over supplied data: list entities, fetch a stored node and body, expand its neighbourhood, find the shortest directed path through declared edges, and scan claims by predicate / value.
 3. Rebuilds off-lock, then atomically replaces the graph. Queries can pause briefly during replacement.
 
 No database. This is designed for bounded, recent crawls kept in memory. Ingested state is lost when the process restarts.
@@ -35,7 +35,7 @@ No database. This is designed for bounded, recent crawls kept in memory. Ingeste
 | GET | `/` | Service info + endpoint list. |
 | GET | `/healthz` | Liveness probe. |
 | GET | `/nodes` | List every entity in the graph (summary view). |
-| GET | `/nodes/{id}` | Fetch one entity's full AEO body. |
+| GET | `/nodes/{id}` | Fetch one stored node and its supplied body. |
 | GET | `/nodes/{id}/neighbors` | Outbound + inbound neighbours, with edge kinds. |
 | GET | `/shortest-path?from=&to=` | A* search; returns `{ found, length, hops[] }`. |
 | GET | `/find-by-claim?predicate=&value=` | Linear claim scan; at least one of the two parameters is required. |
@@ -46,7 +46,7 @@ URL-encoded entity IDs are supported (`https%3A%2F%2Facme.example%2F%23org`). Du
 
 ### Input contract
 
-Each line must contain `id`, an `entity` object with the same `id`, and a `body` object. At least one valid node is required. `body.peers`, `body.authority.primary_sources`, and `body.claims` populate the corresponding graph queries. The bundled `examples/sample.jsonl` is an enriched example.
+Each line must contain `id`, an `entity` object with the same `id`, and a `body` object. At least one valid node is required. `body.peers`, `body.authority.primary_sources`, and `body.claims` populate the corresponding graph queries. The service does not fetch missing documents, validate the full AEO schema, or verify the truth of supplied claims. The bundled `examples/sample.jsonl` is an enriched example.
 
 The current [aeo-crawler](https://github.com/mizcausevic-dev/aeo-crawler) CLI instead emits `origin`, `depth`, `success`, `entity_name`, `entity_type`, and `claims_count` summary fields. Its rows have no `body`, so they cannot produce meaningful edges or claim matches. `/ingest` rejects that shape with a contract error. An upstream enriched export or a separate fetch-and-enrich adapter is required before the crawler-to-explorer bridge can be claimed as working.
 
@@ -59,7 +59,7 @@ cargo install aeo-graph-explorer       # or build from source
 aeo-graph-explorer                     # binds 127.0.0.1:8092 by default
 ```
 
-Set `PORT` / `HOST` env vars to override. Set a high-entropy `AEO_GRAPH_INGEST_TOKEN` in the process environment to enable `/ingest`. Keep it in a secret manager for a hosted service; never put it in a URL or repository. A non-loopback bind such as `HOST=0.0.0.0` also requires `AEO_GRAPH_ALLOW_NON_LOOPBACK=1` to acknowledge exposure. All read endpoints return data without built-in authentication, including full document bodies. Keep the reference service on loopback unless a trusted gateway provides read authorization, rate limits, and transport security. The crate alone does not provide tenant isolation, persistence, or a production audit trail, and has not been verified as a hosted service.
+Set `PORT` / `HOST` env vars to override. Set a high-entropy `AEO_GRAPH_INGEST_TOKEN` in the process environment to enable `/ingest`. Keep it in a secret manager for a hosted service; never put it in a URL or repository. A non-loopback bind such as `HOST=0.0.0.0` also requires `AEO_GRAPH_ALLOW_NON_LOOPBACK=1` to acknowledge exposure. All read endpoints return supplied node bodies without built-in authentication. Keep the reference service on loopback unless a trusted gateway provides read authorization, rate limits, and transport security. The crate alone does not provide tenant isolation, persistence, or a production audit trail, and has not been verified as a hosted service.
 
 The optional `AUDIT_STREAM_URL` hook attempts to send aggregate ingest counts to `/events`. Only absolute HTTP(S) base URLs without embedded credentials, query, or fragment are accepted; the default client does not follow redirects. Delivery is best-effort and can delay an ingest response by up to `AUDIT_STREAM_TIMEOUT_S` (default 2.5 seconds, maximum 30). It is not a durable audit receipt.
 
