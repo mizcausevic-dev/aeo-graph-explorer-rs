@@ -263,6 +263,7 @@ impl IntoResponse for GraphError {
             GraphError::NotFound(_) => (StatusCode::NOT_FOUND, self.to_string()),
             GraphError::JsonLine { .. }
             | GraphError::CrawlerSummary(_)
+            | GraphError::InvalidProvenance(_)
             | GraphError::EmptyGraph
             | GraphError::InvalidBody(_)
             | GraphError::DuplicateNode(_)

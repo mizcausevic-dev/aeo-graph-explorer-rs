@@ -7,7 +7,7 @@
 //! ```text
 //! 1. SDKs       aeo-sdk-python / -typescript / -rust / -go / -swift
 //! 2. CLI        aeo-cli
-//! 3. Crawler    aeo-crawler                 produces summary JSONL
+//! 3. Crawler    aeo-crawler --format graph   produces enriched JSONL
 //! 4. Validator  aeo-validator-service       HTTP validation + caller-triggered drift rechecks
 //! 5. Explorer   aeo-graph-explorer-rs       <- this repo
 //! ```
@@ -40,8 +40,7 @@
 //! ## Potential integrations
 //!
 //! - **[aeo-crawler](https://github.com/mizcausevic-dev/aeo-crawler)** —
-//!   its current summary JSONL needs an enriched export or adapter before
-//!   the graph endpoints can use it.
+//!   `--format graph` emits directly ingestible parsed v0.1 declarations.
 //! - **[aeo-validator-service](https://github.com/mizcausevic-dev/aeo-validator-service)**
 //!   — a separate adapter could select watch URLs from `/nodes`.
 //! - **[incident-correlation-rs](https://github.com/mizcausevic-dev/incident-correlation-rs)**
@@ -70,7 +69,7 @@ pub mod audit_stream;
 pub use app::{build_router, AppState};
 pub use error::GraphError;
 pub use graph::{AeoGraph, EdgeKind};
-pub use model::{AeoClaim, AeoEntity, AeoNode};
+pub use model::{AeoClaim, AeoEntity, AeoNode, CrawlProvenance};
 pub use query::{
     find_by_claim, neighbors, shortest_path, ClaimMatch, NeighborView, PathHop, PathResult,
 };

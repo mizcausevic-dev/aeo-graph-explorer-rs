@@ -159,3 +159,53 @@ fn find_by_claim_empty_query_is_error() {
     let err = aeo_graph_explorer::query::find_by_claim(&g, None, None).unwrap_err();
     assert!(matches!(err, aeo_graph_explorer::GraphError::EmptyQuery));
 }
+
+#[test]
+fn crawler_graph_export_links_sources_and_preserves_parsed_claims() {
+    let graph = AeoGraph::from_jsonl(include_str!("../examples/crawler-graph.jsonl")).unwrap();
+    assert_eq!(graph.node_count(), 2);
+    assert_eq!(graph.edge_count(), 1);
+    let alpha = graph.node("https://alpha.example/#org").unwrap();
+    assert_eq!(
+        alpha.provenance.as_ref().unwrap().origin,
+        "https://alpha.example"
+    );
+    assert_eq!(alpha.body["claims"][0]["predicate"], "industry");
+    let path = shortest_path(
+        &graph,
+        "https://alpha.example/#org",
+        "https://beta.example/#org",
+    )
+    .unwrap();
+    assert!(path.found);
+    assert_eq!(path.length, 1);
+    assert!(matches!(path.hops[0].via, Some(EdgeKind::CitesAuthority)));
+    let claims =
+        aeo_graph_explorer::find_by_claim(&graph, Some("industry"), Some("education")).unwrap();
+    assert_eq!(claims.len(), 2);
+}
+
+#[test]
+fn duplicate_or_untrusted_crawl_origins_are_rejected() {
+    let first = r#"{"id":"a","entity":{"id":"a"},"body":{},"provenance":{"origin":"https://example.com","depth":0,"fetched_at":"now"}}"#;
+    let duplicate = r#"{"id":"b","entity":{"id":"b"},"body":{},"provenance":{"origin":"https://example.com/path","depth":1,"fetched_at":"now"}}"#;
+    let err = AeoGraph::from_jsonl(&format!("{first}\n{duplicate}\n")).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::InvalidProvenance(2)
+    ));
+
+    let duplicate = r#"{"id":"b","entity":{"id":"b"},"body":{},"provenance":{"origin":"https://example.com/","depth":1,"fetched_at":"now"}}"#;
+    let err = AeoGraph::from_jsonl(&format!("{first}\n{duplicate}\n")).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::InvalidProvenance(2)
+    ));
+
+    let credentialed = first.replace("https://example.com", "https://user@example.com");
+    let err = AeoGraph::from_jsonl(&credentialed).unwrap_err();
+    assert!(matches!(
+        err,
+        aeo_graph_explorer::GraphError::InvalidProvenance(1)
+    ));
+}

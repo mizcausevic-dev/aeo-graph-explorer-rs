@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aeo-graph-explorer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "criterion",
@@ -16,6 +16,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tower",
+ "url",
  "wiremock",
 ]
 
