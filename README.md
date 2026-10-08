@@ -61,6 +61,8 @@ aeo-graph-explorer                     # binds 127.0.0.1:8092 by default
 
 Set `PORT` / `HOST` env vars to override. Set a high-entropy `AEO_GRAPH_INGEST_TOKEN` in the process environment to enable `/ingest`. Keep it in a secret manager for a hosted service; never put it in a URL or repository. A non-loopback bind such as `HOST=0.0.0.0` also requires `AEO_GRAPH_ALLOW_NON_LOOPBACK=1` to acknowledge exposure. All read endpoints return supplied node bodies without built-in authentication. Keep the reference service on loopback unless a trusted gateway provides read authorization, rate limits, and transport security. The crate alone does not provide tenant isolation, persistence, or a production audit trail, and has not been verified as a hosted service.
 
+The 2 MiB ingest body is buffered before the handler checks its bearer token. A hosted gateway must enforce request size, concurrency, and rate limits before forwarding traffic to this service.
+
 The optional `AUDIT_STREAM_URL` hook attempts to send aggregate ingest counts to `/events`. Only absolute HTTP(S) base URLs without embedded credentials, query, or fragment are accepted; the default client does not follow redirects. Delivery is best-effort and can delay an ingest response by up to `AUDIT_STREAM_TIMEOUT_S` (default 2.5 seconds, maximum 30). It is not a durable audit receipt.
 
 ---
